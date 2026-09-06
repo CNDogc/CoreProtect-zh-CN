@@ -137,7 +137,22 @@ public class ConfigFile extends Config {
         }
         else {
             final ConfigFile temp = new ConfigFile();
+            if (!isCache && LANGUAGE.equals(fileName)) {
+                // i18n-zh: seed the default language file with the bundled complete zh-CN translation
+                try (InputStream template = ConfigFile.class.getResourceAsStream("/lang/language-zh.yml")) {
+                    if (template != null) {
+                        Files.copy(template, globalFile.toPath());
+                    }
+                }
+                catch (Exception e) {
+                    // fall back to English defaults below
+                }
+            }
             temp.addMissingOptions(globalFile);
+            if (!isCache && LANGUAGE.equals(fileName) && globalFile.exists()) {
+                // apply the seeded translation immediately on first run
+                temp.load(new ByteArrayInputStream(Files.readAllBytes(globalFile.toPath())), fileName, isCache);
+            }
         }
 
         return map;
