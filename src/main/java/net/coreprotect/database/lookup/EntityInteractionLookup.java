@@ -28,6 +28,7 @@ import net.coreprotect.utility.EntitySpawnTracking;
 import net.coreprotect.utility.EntityUtils;
 import net.coreprotect.utility.ErrorReporter;
 import net.coreprotect.utility.WorldUtils;
+import net.coreprotect.utility.ZhNameMapper;
 
 public final class EntityInteractionLookup {
 
@@ -145,7 +146,7 @@ public final class EntityInteractionLookup {
 
     public static String entityName(int typeId) {
         EntityType type = EntityUtils.getEntityType(typeId);
-        return type == null ? "unknown" : type.name().toLowerCase(Locale.ROOT);
+        return type == null ? "unknown" : ZhNameMapper.entity(type.name().toLowerCase(Locale.ROOT));
     }
 
     private static DisplayLocation resolveDisplayLocation(EntitySpawnRecord record, Location liveLocation) throws Exception {

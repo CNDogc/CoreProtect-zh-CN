@@ -123,7 +123,7 @@ public class MaterialUtils extends Queue {
     public static String getBlockDisplayName(int id, int data) {
         Material material = getType(id);
         if (material != null) {
-            return StringUtils.nameFilter(material.name().toLowerCase(Locale.ROOT), data);
+            return ZhNameMapper.material(StringUtils.nameFilter(material.name().toLowerCase(Locale.ROOT), data));
         }
 
         return getBlockName(id);

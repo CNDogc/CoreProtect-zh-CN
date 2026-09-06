@@ -706,7 +706,7 @@ public class ItemUtils {
             message.insert(0, enchantments.isEmpty() ? Color.WHITE : Color.AQUA);
         }
         else if (!enchantments.isEmpty()) {
-            String name = StringUtils.capitalize(item.getType().name().replace("_", " "), true);
+            String name = ZhNameMapper.material(item.getType().name().toLowerCase(Locale.ROOT));
             message.insert(0, Color.AQUA + Color.ITALIC + name);
         }
 

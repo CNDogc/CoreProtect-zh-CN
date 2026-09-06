@@ -56,3 +56,15 @@ mvn package                                    # 重新编译验证
 - modded 方块/实体（CraftEngine、MythicMobs 自定义等）不在官方语言文件内，回退英文名。
 - 悬停提示里的附魔/药水效果文本未汉化（仅物品回退名已汉化）。
 - `CoreProtect` 品牌字样、玩家名、世界名、坐标保持原样。
+
+## 名称映射覆盖率（paper-api 26.2.build.48-alpha，2026-09 实测）
+
+| 类别 | 覆盖 | 说明 |
+| --- | --- | --- |
+| `org.bukkit.Material`（排除 legacy_*） | 1691/1691 | 100%；`*_wall_banner` 通过站立旗帜别名补齐 |
+| `org.bukkit.entity.EntityType` | 158/159 | 唯一未映射是 CoreProtect 内部伪类型 `unknown` |
+| 词条（Phrase） | 235/235 | `bash tools/check-lang-keys.sh` 校验 |
+
+名称数据来源：Mojang 官方 MC 26.2 `zh_cn.json`（经资源索引 CDN 下载，
+生成命令见 `tools/gen-names-zh.py` 头注释）。`wheat` 存在方块/物品异译
+（小麦植株/小麦），保留方块侧。
