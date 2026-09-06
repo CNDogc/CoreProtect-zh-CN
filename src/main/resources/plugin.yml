@@ -15,17 +15,17 @@ commands:
   co:
     description: Utilize the plugin
     permission: coreprotect.co
-    permission-message: §3CoreProtect §f- You do not have permission to do that.
+    permission-message: §3CoreProtect §f- 你没有权限执行该操作。
     usage: /<command> <params>
   core:
     description: Utilize the plugin
     permission: coreprotect.core
-    permission-message: §3CoreProtect §f- You do not have permission to do that.
+    permission-message: §3CoreProtect §f- 你没有权限执行该操作。
     usage: /<command> <params>
   coreprotect:
     description: Utilize the plugin
     permission: coreprotect.coreprotect
-    permission-message: §3CoreProtect §f- You do not have permission to do that.
+    permission-message: §3CoreProtect §f- 你没有权限执行该操作。
     usage: /<command> <params>
 permissions:
     coreprotect.*:
