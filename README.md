@@ -1,5 +1,7 @@
 ![CoreProtect](https://userfolio.com/uploads/coreprotect-banner-v19.png)
 
+> **[简体中文说明（i18n-zh 分支）](README.zh-CN.md)** — This is an unofficial fork adding a complete Simplified Chinese localization. See the linked document for details.
+
 [![Artistic License 2.0](https://img.shields.io/github/license/PlayPro/CoreProtect?&logo=github)](https://github.com/PlayPro/CoreProtect/blob/master/LICENSE)
 [![GitHub Workflows](https://github.com/PlayPro/CoreProtect/actions/workflows/build.yml/badge.svg)](https://github.com/PlayPro/CoreProtect/actions)
 [![Netlify Status](https://img.shields.io/netlify/c1d26a0f-65c5-4e4b-95d7-e08af671ab67)](https://app.netlify.com/sites/coreprotect/deploys)
