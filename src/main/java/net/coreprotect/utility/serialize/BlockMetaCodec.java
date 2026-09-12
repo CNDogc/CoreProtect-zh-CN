@@ -1,5 +1,6 @@
 package net.coreprotect.utility.serialize;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -207,13 +208,17 @@ public final class BlockMetaCodec {
     }
 
     public static List<Object> decode(byte[] encoded) {
+        return decode(encoded, true);
+    }
+
+    private static List<Object> decode(byte[] encoded, boolean resolveConfigurations) {
         Objects.requireNonNull(encoded, "encoded");
         if (encoded.length > BinaryCodecSupport.MAX_ENCODED_LENGTH) {
             throw new IllegalArgumentException("Block metadata exceeds the maximum encoded size");
         }
 
         try {
-            BinaryInput input = new BinaryInput(encoded);
+            BinaryInput input = new BinaryInput(encoded, resolveConfigurations);
             Kind kind = input.readHeader();
             List<Object> metadata;
             switch (kind) {
@@ -247,7 +252,15 @@ public final class BlockMetaCodec {
     }
 
     public static byte[] canonicalize(byte[] encoded) {
-        return encode(decode(encoded));
+        return encode(decode(encoded, false));
+    }
+
+    public static byte[] fromLegacy(byte[] serialized) throws IOException, ClassNotFoundException {
+        return encode(LegacyMetadataCodec.decode(serialized));
+    }
+
+    public static byte[] toLegacy(byte[] encoded) throws IOException, ClassNotFoundException {
+        return LegacyMetadataCodec.encode(decode(encoded, false));
     }
 
     public static boolean isEncoded(byte[] data) {
@@ -260,7 +273,7 @@ public final class BlockMetaCodec {
         if (!metadata.isEmpty()) {
             boolean command = true;
             for (Object value : metadata) {
-                if (!(value instanceof String)) {
+                if (!(value instanceof String) && !(value instanceof LegacyMetadataCodec.AttributeValue)) {
                     command = false;
                     break;
                 }
@@ -307,7 +320,8 @@ public final class BlockMetaCodec {
     private static void encodeCommand(BinaryOutput output, List<Object> metadata) {
         output.writeLength(metadata.size());
         for (Object value : metadata) {
-            output.writeString((String) value);
+            output.writeString(value instanceof LegacyMetadataCodec.AttributeValue
+                    ? ((LegacyMetadataCodec.AttributeValue) value).key() : (String) value);
         }
     }
 
@@ -408,12 +422,22 @@ public final class BlockMetaCodec {
             output.write(STRING);
             output.writeString(value.toString());
         }
+        else if (value instanceof LegacyMetadataCodec.ConfigurationValue) {
+            LegacyMetadataCodec.ConfigurationValue configuration = (LegacyMetadataCodec.ConfigurationValue) value;
+            output.write(CONFIGURATION);
+            output.writeString(configuration.alias());
+            encodeStringMapBody(output, configuration.values(), depth);
+        }
         else if (value instanceof ConfigurationSerializable) {
             encodeConfigurationValue(output, (ConfigurationSerializable) value, depth);
         }
         else if (value instanceof Keyed || value instanceof Sound || value instanceof PotionEffectType) {
             output.write(STRING);
             output.writeString(registryKey(value));
+        }
+        else if (value instanceof LegacyMetadataCodec.AttributeValue) {
+            output.write(STRING);
+            output.writeString(((LegacyMetadataCodec.AttributeValue) value).key());
         }
         else if (value instanceof Enum<?>) {
             encodeEnum(output, (Enum<?>) value);
@@ -854,9 +878,11 @@ public final class BlockMetaCodec {
     private static final class BinaryInput extends BinaryCodecSupport.Input {
         private final List<String> localStrings = new ArrayList<>();
         private final Map<String, Integer> localStringIdentifiers = new HashMap<>();
+        private final boolean resolveConfigurations;
 
-        private BinaryInput(byte[] data) {
+        private BinaryInput(byte[] data, boolean resolveConfigurations) {
             super(data, DESCRIPTION);
+            this.resolveConfigurations = resolveConfigurations;
         }
 
         private Kind readHeader() {
@@ -964,7 +990,10 @@ public final class BlockMetaCodec {
                 case FIREWORK_TYPE:
                     return readFireworkType();
                 case CONFIGURATION:
-                    return parseConfigurationValue(readString(), readStringMapBody(depth));
+                    String alias = readString();
+                    Map<String, Object> serialized = readStringMapBody(depth);
+                    return resolveConfigurations ? parseConfigurationValue(alias, serialized)
+                            : new LegacyMetadataCodec.ConfigurationValue(alias, serialized);
                 case ENUM:
                     return parseEnum(readString(), readString());
                 case DOUBLE_ZERO:

@@ -3,6 +3,7 @@ package net.coreprotect.listener.entity;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.util.Locale;
+import java.util.UUID;
 
 import org.bukkit.GameMode;
 import org.bukkit.Material;
@@ -29,40 +30,41 @@ import net.coreprotect.utility.Chat;
 import net.coreprotect.utility.Color;
 import net.coreprotect.utility.MaterialUtils;
 import net.coreprotect.utility.ErrorReporter;
+import net.coreprotect.utility.LookupThrottle;
 
 public final class HangingBreakByEntityListener extends Queue implements Listener {
 
     static void inspectItemFrame(final BlockState block, final Player player) {
+        inspectEntity(block, player, null);
+    }
+
+    static void inspectEntity(final BlockState block, final Player player, final UUID entityUuid) {
         // block check
+        if (!player.hasPermission("coreprotect.inspect")) {
+            Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.NO_PERMISSION));
+            ConfigHandler.inspecting.put(player.getName(), false);
+            return;
+        }
+        if (ConfigHandler.converterRunning) {
+            Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.UPGRADE_IN_PROGRESS));
+            return;
+        }
+        if (ConfigHandler.purgeRunning) {
+            Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.PURGE_IN_PROGRESS));
+            return;
+        }
+        if (!LookupThrottle.tryAcquire(player.getName(), 100)) {
+            Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.DATABASE_BUSY));
+            return;
+        }
+
         class BasicThread implements Runnable {
             @Override
             public void run() {
-                if (!player.hasPermission("coreprotect.inspect")) {
-                    Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.NO_PERMISSION));
-                    ConfigHandler.inspecting.put(player.getName(), false);
-                    return;
-                }
-                if (ConfigHandler.converterRunning) {
-                    Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.UPGRADE_IN_PROGRESS));
-                    return;
-                }
-                if (ConfigHandler.purgeRunning) {
-                    Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.PURGE_IN_PROGRESS));
-                    return;
-                }
-                if (ConfigHandler.lookupThrottle.get(player.getName()) != null) {
-                    Object[] lookupThrottle = ConfigHandler.lookupThrottle.get(player.getName());
-                    if ((boolean) lookupThrottle[0] || ((System.currentTimeMillis() - (long) lookupThrottle[1])) < 100) {
-                        Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.DATABASE_BUSY));
-                        return;
-                    }
-                }
-                ConfigHandler.lookupThrottle.put(player.getName(), new Object[] { true, System.currentTimeMillis() });
-
                 try (Connection connection = Database.getConnection(true)) {
                     if (connection != null) {
                         Statement statement = connection.createStatement();
-                        String blockData = BlockLookup.performLookup(null, statement, block, player, 0, 1, 7);
+                        String blockData = entityUuid == null ? BlockLookup.performLookup(null, statement, block, player, 0, 1, 7) : BlockLookup.performEntityLookup(null, statement, block, player, 1, 7, entityUuid);
 
                         if (blockData.contains("\n")) {
                             for (String b : blockData.split("\n")) {
@@ -82,13 +84,20 @@ public final class HangingBreakByEntityListener extends Queue implements Listene
                 catch (Exception e) {
                     ErrorReporter.report(e);
                 }
-
-                ConfigHandler.lookupThrottle.put(player.getName(), new Object[] { false, System.currentTimeMillis() });
+                finally {
+                    LookupThrottle.release(player.getName());
+                }
             }
         }
-        Runnable runnable = new BasicThread();
-        Thread thread = new Thread(runnable);
-        thread.start();
+        try {
+            Runnable runnable = new BasicThread();
+            Thread thread = new Thread(runnable);
+            thread.start();
+        }
+        catch (RuntimeException | Error e) {
+            LookupThrottle.release(player.getName());
+            throw e;
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)

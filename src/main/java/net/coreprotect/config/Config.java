@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
 import org.bukkit.Bukkit;
 import org.bukkit.World;
@@ -30,6 +31,7 @@ public class Config extends Language {
     private static final Map<String, String> DEFAULT_VALUES = new LinkedHashMap<>();
     private static final Map<String, Config> CONFIG_BY_WORLD_NAME = new HashMap<>();
     private static final String DEFAULT_FILE_HEADER = "# CoreProtect Config";
+    private static final Pattern NON_DIGIT_PATTERN = Pattern.compile("[^0-9]");
     public static final String LINE_SEPARATOR = "\n";
 
     private static final Config GLOBAL = new Config();
@@ -44,6 +46,7 @@ public class Config extends Language {
     public String CLICKHOUSE_PASSWORD;
     public String DUCKDB_MEMORY_LIMIT;
     public String DUCKDB_MAX_TEMP_DIRECTORY_SIZE;
+    public String SQLITE_DATABASE;
     public String PREFIX;
     public String MYSQL_HOST;
     public String MYSQL_DATABASE;
@@ -258,6 +261,7 @@ public class Config extends Language {
         this.DUCKDB_MEMORY_LIMIT = this.getString("duckdb-memory-limit");
         this.DUCKDB_THREADS = this.getInt("duckdb-threads", 3);
         this.DUCKDB_MAX_TEMP_DIRECTORY_SIZE = this.getString("duckdb-max-temp-directory-size");
+        this.SQLITE_DATABASE = this.getString("sqlite-database");
         this.LANGUAGE = this.getString("language");
         this.AUTO_PURGE = this.getString("auto-purge");
         this.AUTO_PURGE_TIME = this.getString("auto-purge-time");
@@ -373,7 +377,7 @@ public class Config extends Language {
             return dfl;
         }
 
-        configured = configured.replaceAll("[^0-9]", "");
+        configured = NON_DIGIT_PATTERN.matcher(configured).replaceAll("");
 
         return configured.isEmpty() ? dfl : Integer.parseInt(configured);
     }
