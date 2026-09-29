@@ -78,6 +78,7 @@ public class Config extends Language {
     public boolean NATURAL_BREAK;
     public boolean BLOCK_MOVEMENT;
     public boolean PISTONS;
+    public boolean DISPENSERS;
     public boolean BLOCK_BURN;
     public boolean BLOCK_IGNITE;
     public boolean FIRE_EXTINGUISH;
@@ -149,6 +150,7 @@ public class Config extends Language {
         DEFAULT_VALUES.put("natural-break", "true");
         DEFAULT_VALUES.put("block-movement", "true");
         DEFAULT_VALUES.put("pistons", "true");
+        DEFAULT_VALUES.put("dispensers", "true");
         DEFAULT_VALUES.put("block-burn", "true");
         DEFAULT_VALUES.put("block-ignite", "true");
         DEFAULT_VALUES.put("fire-extinguish", "false");
@@ -181,7 +183,7 @@ public class Config extends Language {
         HEADERS.put("donation-key", new String[] { "# CoreProtect 是捐赠制软件。捐赠密钥可从 coreprotect.net/donate/ 获取。" });
         HEADERS.put("database-type", new String[] { "# CoreProtect 使用的数据库引擎，可选值：duckdb、clickhouse、sqlite、mysql。", "# 更改数据库引擎或连接目标后，请执行 /co reload 或重启服务器。" });
         HEADERS.put("mysql-host", new String[] { "# MySQL 连接设置。" });
-        HEADERS.put("clickhouse-host", new String[] { "# ClickHouse 连接设置（要求 ClickHouse 25.6 或更高版本）。", "# 所配置的数据库必须已存在；CoreProtect 会创建其带前缀的数据表和视图。", "# 多写入端需满足：禁用 database-lock、版本与前缀一致、数据目录各自独立、直连同一物理服务器。", "# 各写入端时钟需保持同步；共享前缀即世界与玩家的同一逻辑命名空间。", "# 不要重新分配用户名；更名后需先记录带 UUID 的登录，再记录无 UUID 的活动。", "# 迁移或清除数据前先停止所有写入端；清除数据时剩余服务器需开启 database-lock。", "# 不支持副本、分布式或负载均衡等相互独立的 ClickHouse 节点。" });
+        HEADERS.put("clickhouse-host", new String[] { "# ClickHouse 连接设置（要求 ClickHouse 26.1 或更高版本）。", "# 所配置的数据库必须已存在；CoreProtect 会创建其带前缀的数据表和视图。", "# 多写入端需满足：禁用 database-lock、版本与前缀一致、数据目录各自独立、直连同一物理服务器。", "# 各写入端时钟需保持同步；共享前缀即世界与玩家的同一逻辑命名空间。", "# 不要重新分配用户名；更名后需先记录带 UUID 的登录，再记录无 UUID 的活动。", "# 迁移或清除数据前先停止所有写入端；清除数据时剩余服务器需开启 database-lock。", "# 不支持副本、分布式或负载均衡等相互独立的 ClickHouse 节点。" });
         HEADERS.put("duckdb-memory-limit", new String[] { "# 内嵌 DuckDB 数据库的资源限制。", "# memory-limit 控制 DuckDB 的缓冲管理器；temporary 限制溢写数据上限，不会预先占用。" });
         HEADERS.put("language", new String[] { "# 若修改此项，将自动尝试在线翻译各词条。", "# 语言代码列表：https://coreprotect.net/languages/ ｜ 本分支已默认内置完整简中（language.yml），无需修改。" });
         HEADERS.put("auto-purge", new String[] { "# 自动清除早于所配置时间的数据。", "# 示例：30d、12w、6mo。设为 false 可禁用。" });
@@ -199,6 +201,7 @@ public class Config extends Language {
         HEADERS.put("natural-break", new String[] { "# 记录从其他方块上脱落的方块，例如玩家破坏泥土后随之掉落的告示牌或火把。", "# 床/门的正常回滚依赖此选项。" });
         HEADERS.put("block-movement", new String[] { "# 正确追踪方块移动，例如沙子或沙砾下落。" });
         HEADERS.put("pistons", new String[] { "# 正确追踪被活塞移动的方块。" });
+        HEADERS.put("dispensers", new String[] { "# 记录发射器造成的方块放置与移除事件。" });
         HEADERS.put("block-burn", new String[] { "# 记录在火中烧毁的方块。" });
         HEADERS.put("block-ignite", new String[] { "# 记录方块被自然点燃的情况，例如火势蔓延。" });
         HEADERS.put("fire-extinguish", new String[] { "# 记录火焰自然熄灭的情况。" });
@@ -279,6 +282,7 @@ public class Config extends Language {
         this.NATURAL_BREAK = this.getBoolean("natural-break");
         this.BLOCK_MOVEMENT = this.getBoolean("block-movement");
         this.PISTONS = this.getBoolean("pistons");
+        this.DISPENSERS = this.getBoolean("dispensers");
         this.BLOCK_BURN = this.getBoolean("block-burn");
         this.BLOCK_IGNITE = this.getBoolean("block-ignite");
         this.FIRE_EXTINGUISH = this.getBoolean("fire-extinguish");

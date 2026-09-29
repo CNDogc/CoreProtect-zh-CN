@@ -162,8 +162,8 @@ public class StandardLookupThread implements Runnable {
             ConfigHandler.lookupRadius.put(player.getName(), radius);
             ConfigHandler.lookupOutputMode.put(player.getName(), outputMode == LookupOutputMode.COUNT ? LookupOutputMode.DETAIL : outputMode);
             ConfigHandler.lookupRollbackState.put(player.getName(), rollbackState);
-            if (typeLookup != 5 || outputMode != LookupOutputMode.DETAIL || !ConfigHandler.databaseType.isDuckDB()) {
-                ConfigHandler.lookupDuckDBCursor.remove(player.getName());
+            if (typeLookup != 5 || outputMode != LookupOutputMode.DETAIL || !ConfigHandler.databaseType.isColumnar()) {
+                ConfigHandler.lookupCursor.remove(player.getName());
             }
 
             if (connection != null) {
@@ -246,7 +246,6 @@ public class StandardLookupThread implements Runnable {
                     boolean checkRows = true;
                     LookupPage lookupPage = null;
                     List<LookupSummaryRow> summaryRows = null;
-                    boolean summaryRecordCountKnown = false;
 
                     if (typeLookup == 5 && page > 1) {
                         rowData = ConfigHandler.lookupRows.get(player.getName());
@@ -265,25 +264,20 @@ public class StandardLookupThread implements Runnable {
 
                     if (checkRows) {
                         if (outputMode == LookupOutputMode.SUMMARY) {
-                            if (pageStart == 0 && Lookup.supportsSummaryWindowFunctions(statement)) {
+                            rows = 0L;
+                            recordRows = Lookup.countLookupRows(statement, player, uuidList, userList, blockList, excludedBlocks, excludedUsers, actions, entityActionFilter, messageFilters, entityContext, finalLocation, radius, rowData, timeStart, timeEnd, restrict_world, true, entityContainerId, rollbackState);
+                            if (recordRows > 0 && pageStart == 0 && Lookup.supportsSummaryWindowFunctions(statement)) {
                                 LookupSummaryPage summaryPage = Lookup.performSummaryLookupPage(statement, player, uuidList, userList, blockList, excludedBlocks, excludedUsers, actions, entityActionFilter, entityContext, finalLocation, radius, timeStart, timeEnd, (int) pageStart, displayResults, restrict_world, entityContainerId, rollbackState);
                                 rows = summaryPage.getTotalRows();
-                                recordRows = summaryPage.getRecordRows();
-                                summaryRecordCountKnown = true;
                                 summaryRows = summaryPage.getRows();
                             }
-                            else {
+                            else if (recordRows > 0) {
                                 rows = Lookup.countSummaryRows(statement, player, uuidList, userList, blockList, excludedBlocks, excludedUsers, actions, entityActionFilter, entityContext, finalLocation, radius, timeStart, timeEnd, restrict_world, entityContainerId, rollbackState);
                             }
-                            if (rows > 0 && !summaryRecordCountKnown) {
-                                recordRows = Lookup.countLookupRows(statement, player, uuidList, userList, blockList, excludedBlocks, excludedUsers, actions, entityActionFilter, messageFilters, entityContext, finalLocation, radius, rowData, timeStart, timeEnd, restrict_world, true, entityContainerId, rollbackState);
-                            }
-                            if (rows > 0) {
-                                rowData[0] = recordRows;
-                                rowData[1] = 0L;
-                                rowData[2] = 0L;
-                                rowData[3] = 0L;
-                            }
+                            rowData[0] = recordRows;
+                            rowData[1] = 0L;
+                            rowData[2] = 0L;
+                            rowData[3] = 0L;
                         }
                         else {
                             if (pageStart == 0 && outputMode == LookupOutputMode.DETAIL && ConfigHandler.databaseType.isDuckDB()) {
@@ -297,29 +291,27 @@ public class StandardLookupThread implements Runnable {
                         rowData[4] = rows;
                         ConfigHandler.lookupRows.put(player.getName(), rowData);
                     }
-                    if (lookupPage == null && outputMode == LookupOutputMode.DETAIL && ConfigHandler.databaseType.isDuckDB() && pageStart < rows) {
-                        LookupCursor cursor = ConfigHandler.lookupDuckDBCursor.get(player.getName());
-                        if (cursor == null || cursor.getNextPage() != page || cursor.getPageSize() != displayResults) {
-                            cursor = null;
-                        }
-                        lookupPage = Lookup.performDuckDBLookupPage(statement, player, uuidList, userList, blockList, excludedBlocks, excludedUsers, actions, entityActionFilter, messageFilters, entityContext, finalLocation, radius, rowData, timeStart, timeEnd, (int) pageStart, displayResults, rows, cursor, restrict_world, true, entityContainerId, rollbackState);
+                    if (lookupPage == null && outputMode == LookupOutputMode.DETAIL && ConfigHandler.databaseType.isColumnar() && pageStart < rows) {
+                        LookupCursor cursor = ConfigHandler.lookupCursor.get(player.getName());
+                        lookupPage = Lookup.performLookupPage(statement, player, uuidList, userList, blockList, excludedBlocks, excludedUsers, actions, entityActionFilter, messageFilters, entityContext, finalLocation, radius, rowData, timeStart, timeEnd, (int) pageStart, displayResults, rows, cursor, restrict_world, true, entityContainerId, rollbackState);
                     }
                     if (lookupPage != null) {
                         LookupCursor nextCursor = lookupPage.getNextCursor();
                         if (nextCursor == null) {
-                            ConfigHandler.lookupDuckDBCursor.remove(player.getName());
+                            ConfigHandler.lookupCursor.remove(player.getName());
                         }
                         else {
-                            ConfigHandler.lookupDuckDBCursor.put(player.getName(), nextCursor);
+                            ConfigHandler.lookupCursor.put(player.getName(), nextCursor);
                         }
                     }
                     if (outputMode == LookupOutputMode.COUNT) {
-                        String row_format = NumberFormat.getInstance().format(rows);
-                        Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.LOOKUP_ROWS_FOUND, row_format, (rows == 1 ? Selector.FIRST : Selector.SECOND)));
+                        outputRowCount(rows);
                     }
-                    else if (outputMode == LookupOutputMode.SUMMARY && pageStart < rows) {
+                    else if (outputMode == LookupOutputMode.SUMMARY && (pageStart < rows || (pageStart == 0 && recordRows > 0))) {
                         if (summaryRows == null) {
-                            summaryRows = Lookup.performSummaryLookup(statement, player, uuidList, userList, blockList, excludedBlocks, excludedUsers, actions, entityActionFilter, entityContext, finalLocation, radius, timeStart, timeEnd, (int) pageStart, displayResults, restrict_world, entityContainerId, rollbackState);
+                            summaryRows = rows > 0
+                                    ? Lookup.performSummaryLookup(statement, player, uuidList, userList, blockList, excludedBlocks, excludedUsers, actions, entityActionFilter, entityContext, finalLocation, radius, timeStart, timeEnd, (int) pageStart, displayResults, restrict_world, entityContainerId, rollbackState)
+                                    : Collections.emptyList();
                         }
                         outputSummary(connection, summaryRows, rows, recordRows);
                     }
@@ -656,7 +648,7 @@ public class StandardLookupThread implements Runnable {
                             Chat.sendComponent(player, ChatUtils.getPageNavigation(command.getName(), page, total_pages));
                         }
                     }
-                    else if (rows > 0) {
+                    else if (rows > 0 || (outputMode == LookupOutputMode.SUMMARY && recordRows > 0)) {
                         Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.NO_RESULTS_PAGE, Selector.FIRST));
                     }
                     else {
@@ -683,9 +675,19 @@ public class StandardLookupThread implements Runnable {
         }
     }
 
+    private void outputRowCount(long rows) {
+        String formattedRows = NumberFormat.getInstance().format(rows);
+        Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.LOOKUP_ROWS_FOUND, formattedRows, rows == 1 ? Selector.FIRST : Selector.SECOND));
+    }
+
     private void outputSummary(Connection connection, List<LookupSummaryRow> summaryRows, long totalRows, long recordRows) {
         if (summaryRows.isEmpty()) {
-            Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.NO_RESULTS));
+            if (page == 1 && recordRows > 0) {
+                outputRowCount(recordRows);
+            }
+            else {
+                Chat.sendMessage(player, Color.DARK_AQUA + "CoreProtect " + Color.WHITE + "- " + Phrase.build(Phrase.NO_RESULTS_PAGE, Selector.FIRST));
+            }
             return;
         }
 

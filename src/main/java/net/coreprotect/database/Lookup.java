@@ -65,16 +65,16 @@ public class Lookup extends Queue {
             Consumer.isPaused = true;
             paused = true;
 
-            ResultSet results = LookupRaw.rawLookupResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, messageFilters, entityContext, location, radius, null, startTime, endTime, -1, -1, restrictWorld, lookup, true, entityContainerId, rollbackState);
-            while (results.next()) {
-                int resultTable = results.getInt("tbl");
-                long count = results.getLong("count");
-                if (rowData != null && resultTable >= 0 && resultTable < rowData.length) {
-                    rowData[resultTable] = count;
+            try (ResultSet results = LookupRaw.rawLookupResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, messageFilters, entityContext, location, radius, null, startTime, endTime, -1, -1, restrictWorld, lookup, true, entityContainerId, rollbackState)) {
+                while (results.next()) {
+                    int resultTable = results.getInt("tbl");
+                    long count = results.getLong("count");
+                    if (rowData != null && resultTable >= 0 && resultTable < rowData.length) {
+                        rowData[resultTable] = count;
+                    }
+                    rows += count;
                 }
-                rows += count;
             }
-            results.close();
         }
         catch (Exception e) {
             ErrorReporter.report(e);
@@ -109,7 +109,7 @@ public class Lookup extends Queue {
             }
             Consumer.isPaused = true;
             paused = true;
-            try (ResultSet results = LookupRaw.rawSummaryResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, summaryActions(actionList), entityActionFilter, entityContext, location, radius, startTime, endTime, -1, -1, restrictWorld, entityContainerId, true, rollbackState)) {
+            try (ResultSet results = LookupRaw.rawSummaryResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, entityContext, location, radius, startTime, endTime, -1, -1, restrictWorld, entityContainerId, true, rollbackState)) {
                 return results.next() ? results.getLong("count") : 0L;
             }
         }
@@ -146,7 +146,7 @@ public class Lookup extends Queue {
             }
             Consumer.isPaused = true;
             paused = true;
-            try (ResultSet results = LookupRaw.rawSummaryResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, summaryActions(actionList), entityActionFilter, entityContext, location, radius, startTime, endTime, limitOffset, limitCount, restrictWorld, entityContainerId, false, rollbackState)) {
+            try (ResultSet results = LookupRaw.rawSummaryResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, entityContext, location, radius, startTime, endTime, limitOffset, limitCount, restrictWorld, entityContainerId, false, rollbackState)) {
                 while (results.next()) {
                     rows.add(summaryRow(results));
                 }
@@ -179,7 +179,6 @@ public class Lookup extends Queue {
 
         List<LookupSummaryRow> rows = new ArrayList<>();
         long totalRows = 0L;
-        long recordRows = 0L;
         boolean paused = false;
         try {
             while (Consumer.isPaused && !Consumer.isPersistenceHalted()) {
@@ -187,11 +186,10 @@ public class Lookup extends Queue {
             }
             Consumer.isPaused = true;
             paused = true;
-            try (ResultSet results = LookupRaw.rawSummaryPageResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, summaryActions(actionList), entityActionFilter, entityContext, location, radius, startTime, endTime, limitOffset, limitCount, restrictWorld, entityContainerId, rollbackState)) {
+            try (ResultSet results = LookupRaw.rawSummaryPageResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, entityContext, location, radius, startTime, endTime, limitOffset, limitCount, restrictWorld, entityContainerId, rollbackState)) {
                 while (results.next()) {
                     if (rows.isEmpty()) {
                         totalRows = results.getLong("total_count");
-                        recordRows = results.getLong("record_count");
                     }
                     rows.add(summaryRow(results));
                 }
@@ -205,7 +203,7 @@ public class Lookup extends Queue {
                 Consumer.isPaused = false;
             }
         }
-        return new LookupSummaryPage(totalRows, recordRows, rows);
+        return new LookupSummaryPage(totalRows, rows);
     }
 
     public static boolean supportsSummaryWindowFunctions(Statement statement) {
@@ -235,21 +233,13 @@ public class Lookup extends Queue {
     }
 
     private static boolean hasSummaryActions(List<Integer> actionList) {
-        return actionList.isEmpty() || actionList.contains(LookupActions.BLOCK_BREAK) || actionList.contains(LookupActions.BLOCK_PLACE) || actionList.contains(LookupActions.CONTAINER) || actionList.contains(LookupActions.ITEM);
-    }
-
-    private static List<Integer> summaryActions(List<Integer> actionList) {
-        if (actionList.isEmpty()) {
-            return Collections.emptyList();
+        if (actionList.contains(LookupActions.CONTAINER) || actionList.contains(5)) {
+            return true;
         }
-
-        List<Integer> actions = new ArrayList<>();
-        for (Integer action : actionList) {
-            if ((action == LookupActions.BLOCK_BREAK || action == LookupActions.BLOCK_PLACE || action == LookupActions.CONTAINER || action == LookupActions.ITEM) && !actions.contains(action)) {
-                actions.add(action);
-            }
+        if (actionList.contains(LookupActions.CHAT) || actionList.contains(LookupActions.COMMAND) || actionList.contains(LookupActions.SESSION) || actionList.contains(LookupActions.USERNAME) || actionList.contains(LookupActions.SIGN)) {
+            return false;
         }
-        return actions;
+        return actionList.isEmpty() || actionList.contains(LookupActions.BLOCK_BREAK) || actionList.contains(LookupActions.BLOCK_PLACE) || actionList.contains(LookupActions.ITEM);
     }
 
     public static List<String[]> performLookup(Statement statement, CommandSender user, List<String> checkUuids, List<String> checkUsers, List<Object> restrictList, Map<Object, Boolean> excludeList, List<String> excludeUserList, List<Integer> actionList, Location location, Integer[] radius, long startTime, long endTime, boolean restrictWorld, boolean lookup) {
@@ -311,11 +301,11 @@ public class Lookup extends Queue {
     }
 
     public static LookupPage performDuckDBLookupPage(Statement statement, CommandSender user, List<String> checkUuids, List<String> checkUsers, List<Object> restrictList, Map<Object, Boolean> excludeList, List<String> excludeUserList, List<Integer> actionList, EntityActionFilter entityActionFilter, List<String> messageFilters, EntityLookupContext entityContext, Location location, Integer[] radius, Long[] rowData, long startTime, long endTime, int limitCount, boolean restrictWorld, boolean lookup, Integer entityContainerId, LookupRollbackState rollbackState) {
-        return performDuckDBLookupPage(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, messageFilters, entityContext, location, radius, rowData, startTime, endTime, 0, limitCount, -1L, null, restrictWorld, lookup, entityContainerId, rollbackState);
+        return performLookupPage(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, messageFilters, entityContext, location, radius, rowData, startTime, endTime, 0, limitCount, -1L, null, restrictWorld, lookup, entityContainerId, rollbackState);
     }
 
-    public static LookupPage performDuckDBLookupPage(Statement statement, CommandSender user, List<String> checkUuids, List<String> checkUsers, List<Object> restrictList, Map<Object, Boolean> excludeList, List<String> excludeUserList, List<Integer> actionList, EntityActionFilter entityActionFilter, List<String> messageFilters, EntityLookupContext entityContext, Location location, Integer[] radius, Long[] rowData, long startTime, long endTime, int limitOffset, int limitCount, long knownTotalRows, LookupCursor cursor, boolean restrictWorld, boolean lookup, Integer entityContainerId, LookupRollbackState rollbackState) {
-        LookupRaw.RawLookupPage page = LookupRaw.performDuckDBLookupPage(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, messageFilters, entityContext, location, radius, rowData, startTime, endTime, limitOffset, limitCount, knownTotalRows, cursor, restrictWorld, lookup, entityContainerId, rollbackState);
+    public static LookupPage performLookupPage(Statement statement, CommandSender user, List<String> checkUuids, List<String> checkUsers, List<Object> restrictList, Map<Object, Boolean> excludeList, List<String> excludeUserList, List<Integer> actionList, EntityActionFilter entityActionFilter, List<String> messageFilters, EntityLookupContext entityContext, Location location, Integer[] radius, Long[] rowData, long startTime, long endTime, int limitOffset, int limitCount, long knownTotalRows, LookupCursor cursor, boolean restrictWorld, boolean lookup, Integer entityContainerId, LookupRollbackState rollbackState) {
+        LookupRaw.RawLookupPage page = LookupRaw.performLookupPage(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, messageFilters, entityContext, location, radius, rowData, startTime, endTime, limitOffset, limitCount, knownTotalRows, cursor, restrictWorld, lookup, entityContainerId, rollbackState);
         List<String[]> rows = LookupConverter.convertRawLookup(statement, page.getRows());
         return new LookupPage(page.getTotalRows(), rows, page.getNextCursor());
     }

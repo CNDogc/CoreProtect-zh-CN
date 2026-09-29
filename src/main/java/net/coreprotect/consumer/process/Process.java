@@ -25,6 +25,7 @@ import net.coreprotect.consumer.Queue;
 import net.coreprotect.database.ConsumerEntitySpawnUpdates;
 import net.coreprotect.database.ConsumerWriteBatch;
 import net.coreprotect.database.Database;
+import net.coreprotect.database.DatabaseType;
 import net.coreprotect.database.DuckDBRecovery;
 import net.coreprotect.database.logger.EntityInteractionLogger;
 import net.coreprotect.database.rollback.EntitySpawnRollbackHandler;
@@ -187,6 +188,7 @@ public class Process {
             }
 
             boolean hasEntitySpawnUpdates = false;
+            boolean hasEntitySpawnLogs = false;
             boolean hasEntityContainerTransactions = false;
             boolean hasEntityInteractions = false;
             List<EntitySpawnData> entitySpawnUpdateData = new ArrayList<>();
@@ -201,6 +203,7 @@ public class Process {
                 preflightUser(writeBatch, data, users);
                 int action = (int) data[1];
                 hasEntitySpawnUpdates |= action == Process.ENTITY_SPAWN_UPDATE || action == Process.ENTITY_CONTAINER_TRANSITION_UPDATE;
+                hasEntitySpawnLogs |= action == Process.ENTITY_SPAWN_LOG;
                 hasEntityContainerTransactions |= action == Process.ENTITY_CONTAINER_TRANSACTION;
                 hasEntityInteractions |= action == Process.ENTITY_INTERACTION;
 
@@ -214,6 +217,15 @@ public class Process {
                     Object object = consumerObject.get((int) data[0]);
                     if (object instanceof EntityInteraction) {
                         entityIdentityUuids.add(((EntityInteraction) object).getEntityUuid());
+                    }
+                }
+                else if (action == Process.ENTITY_SPAWN_LOG) {
+                    Object object = consumerObject.get((int) data[0]);
+                    if (object instanceof EntitySpawnData) {
+                        UUID uuid = ((EntitySpawnData) object).getUuid();
+                        if (uuid != null) {
+                            entityIdentityUuids.add(uuid);
+                        }
                     }
                 }
                 else if (action == Process.ENTITY_SPAWN_UPDATE || action == Process.ENTITY_CONTAINER_TRANSITION_UPDATE) {
@@ -241,7 +253,7 @@ public class Process {
             }
             preflightCommitted = true;
 
-            if (hasEntityContainerTransactions || hasEntityInteractions) {
+            if (hasEntityContainerTransactions || hasEntityInteractions || hasEntitySpawnLogs) {
                 entitySpawnIdentities.putAll(EntitySpawnStatement.loadIdentities(connection, entityIdentityUuids));
                 Map<Integer, EntitySpawnIdentity> identitiesByRowId = EntitySpawnStatement.loadIdentitiesByRowIds(connection, entityIdentityRowIds);
                 bindPendingEntitySpawnIdentities(consumerData, consumerObject, entitySpawnIdentities, identitiesByRowId);
@@ -269,6 +281,7 @@ public class Process {
                     int replaceData = (int) data[5];
                     int forceData = (int) data[6];
                     boolean isolatedTransaction = requiresIsolatedDuckDBTransaction(action);
+                    Exception duplicateEntityUuidFailure = null;
                     preparingEvent = null;
 
                     if (isolatedTransaction && i > processedThrough) {
@@ -350,6 +363,11 @@ public class Process {
                                         });
                                     }
                                     catch (Exception e) {
+                                        if (shouldDiscardFailedEvent(ConfigHandler.databaseType, action, e)) {
+                                            Database.acknowledgeRollbackOnlyTransaction();
+                                            duplicateEntityUuidFailure = e;
+                                            break;
+                                        }
                                         pendingEntityInteractions.add(new PendingEntityInteraction(user, interaction, false, true));
                                         throw e;
                                     }
@@ -454,31 +472,43 @@ public class Process {
                                         break;
                                     }
                                     EntitySpawnData spawnData = (EntitySpawnData) object;
+                                    EntitySpawnIdentity existingSpawnIdentity = entitySpawnIdentities.get(spawnData.getUuid());
                                     EntitySpawnIdentity spawnIdentity;
                                     try {
-                                        spawnIdentity = EntitySpawnLogProcess.process(writeBatch, spawnData, user);
+                                        spawnIdentity = EntitySpawnLogProcess.process(writeBatch, spawnData, user, existingSpawnIdentity);
                                     }
                                     catch (Exception e) {
                                         if (ConfigHandler.databaseType.isColumnar()) {
                                             pendingEntitySpawnLogs.add(new PendingEntitySpawnLog(user, spawnData, false, true));
                                         }
-                                        else {
+                                        else if (existingSpawnIdentity == null) {
                                             EntitySpawnTracking.clearTracking(spawnData.getUuid());
                                         }
                                         throw e;
                                     }
                                     if (spawnIdentity != null) {
-                                        entitySpawnIdentities.put(spawnIdentity.getUuid(), spawnIdentity);
-                                        pendingEntitySpawnLogs.add(new PendingEntitySpawnLog(user, spawnData, true, false));
-                                        if (entitySpawnUpdates != null) {
-                                            entitySpawnUpdates.identityFound(spawnIdentity.getUuid());
+                                        entitySpawnIdentities.put(spawnData.getUuid(), spawnIdentity);
+                                        if (existingSpawnIdentity == null) {
+                                            pendingEntitySpawnLogs.add(new PendingEntitySpawnLog(user, spawnData, true, false));
+                                            if (entitySpawnUpdates != null) {
+                                                entitySpawnUpdates.identityFound(spawnData.getUuid());
+                                            }
                                         }
+                                    }
+                                    else if (existingSpawnIdentity == null) {
+                                        EntitySpawnTracking.clearTracking(spawnData.getUuid());
                                     }
                                     break;
                                 case Process.ENTITY_SPAWN_UPDATE:
                                     if (object instanceof EntitySpawnData) {
                                         EntitySpawnData update = (EntitySpawnData) object;
                                         invalidateEntityInteractionIdentityConfirmation(update, pendingEntityIdentityConfirmations, invalidatedEntityIdentityConfirmations);
+                                        if (update.getPreviousUuid() != null) {
+                                            EntitySpawnIdentity previousIdentity = entitySpawnIdentities.get(update.getPreviousUuid());
+                                            if (previousIdentity != null) {
+                                                entitySpawnIdentities.putIfAbsent(update.getUuid(), previousIdentity);
+                                            }
+                                        }
                                         EntitySpawnIdentity createdIdentity = entitySpawnUpdates.apply(update);
                                         if (createdIdentity != null) {
                                             entitySpawnIdentities.put(createdIdentity.getUuid(), createdIdentity);
@@ -541,6 +571,13 @@ public class Process {
                         completeTransactionState(entitySpawnUpdates, pendingEntityContainerTransactions, pendingEntityContainerRollbacks, pendingEntityInteractions, pendingEntityIdentityConfirmations, invalidatedEntityIdentityConfirmations, promotedEntityIdentities, entitySpawnIdentities, pendingEntitySpawnLogs, outcome);
                         if (outcome != TransactionOutcome.COMMITTED) {
                             completeFailedConsumerBatch(processId, consumerData, users, consumerObject, processedThrough, i + 1, outcome == TransactionOutcome.RETAINED);
+                            return;
+                        }
+                        if (duplicateEntityUuidFailure != null) {
+                            EntityInteraction interaction = (EntityInteraction) consumerObject.get(id);
+                            cancelEntityInteractionPromotion(interaction);
+                            ErrorReporter.report(new IllegalStateException("Dropped entity interaction after a duplicate DuckDB entity UUID prevented identity creation: " + interaction.getEntityUuid(), duplicateEntityUuidFailure));
+                            retryConsumerBatch(processId, consumerData, users, consumerObject, processedThrough);
                             return;
                         }
                         if (!beginConsumerTransaction(writeBatch)) {
@@ -629,6 +666,23 @@ public class Process {
         else if (!Consumer.isPersistenceHalted()) {
             deferConsumerRetry();
         }
+    }
+
+    protected static boolean requiresEntityUuidMaintenance(int processId) {
+        if (!ConfigHandler.databaseType.isDuckDB()) {
+            return false;
+        }
+        for (Object object : Consumer.consumerObjects.get(processId).values()) {
+            EntitySpawnData update = getEntitySpawnUpdate(object);
+            if (update == null) {
+                continue;
+            }
+            EntitySpawnData.Operation operation = update.getOperation();
+            if (operation == EntitySpawnData.Operation.REVIVED || operation == EntitySpawnData.Operation.RESTORE || operation == EntitySpawnData.Operation.KILL_ROLLBACK) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void bindPendingEntitySpawnIdentities(ArrayList<Object[]> consumerData, Map<Integer, Object> consumerObjects, Map<UUID, EntitySpawnIdentity> identities, Map<Integer, EntitySpawnIdentity> identitiesByRowId) {
@@ -1022,6 +1076,24 @@ public class Process {
             failure = failure.getCause();
         }
         return !sqlFailure;
+    }
+
+    static boolean shouldDiscardFailedEvent(DatabaseType databaseType, int action, Throwable failure) {
+        if (!databaseType.isDuckDB() || action != ENTITY_INTERACTION) {
+            return false;
+        }
+
+        Set<Throwable> visited = new HashSet<>();
+        while (failure != null && visited.add(failure)) {
+            String message = failure.getMessage();
+            if (failure instanceof SQLException && message != null
+                    && message.contains("Constraint Error: Duplicate key \"uuid: ")
+                    && message.contains("violates unique constraint")) {
+                return true;
+            }
+            failure = failure.getCause();
+        }
+        return false;
     }
 
     private static void clearConsumerData(int processId, ArrayList<Object[]> consumerData, Map<Integer, String[]> users, Map<Integer, Object> consumerObject) {

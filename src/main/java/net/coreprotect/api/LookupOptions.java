@@ -4,6 +4,8 @@ import java.util.List;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.entity.EntityType;
 
 /**
  * Shared options for typed lookup API methods.
@@ -13,30 +15,46 @@ public final class LookupOptions {
     private final int time;
     private final int radius;
     private final Location location;
+    private final World world;
     private final int limitOffset;
     private final int limitCount;
     private final List<Material> includeMaterials;
     private final List<Material> excludeMaterials;
     private final List<String> users;
     private final List<String> excludeUsers;
+    private final List<String> textStartsWithAny;
+    private final List<String> textStartsWithNone;
     private final List<ContainerAction> containerActions;
     private final List<ItemAction> itemActions;
     private final List<InventoryAction> inventoryActions;
+    private final List<BlockAction> blockActions;
+    private final List<SessionAction> sessionActions;
+    private final List<EntityAction> entityActions;
+    private final List<EntityType> includeEntities;
+    private final List<EntityType> excludeEntities;
 
     private LookupOptions(Builder builder) {
         this.user = builder.user;
         this.time = builder.time;
         this.radius = builder.radius;
         this.location = builder.location;
+        this.world = builder.world;
         this.limitOffset = builder.limitOffset;
         this.limitCount = builder.limitCount;
         this.includeMaterials = builder.includeMaterials;
         this.excludeMaterials = builder.excludeMaterials;
         this.users = builder.users;
         this.excludeUsers = builder.excludeUsers;
+        this.textStartsWithAny = builder.textStartsWithAny;
+        this.textStartsWithNone = builder.textStartsWithNone;
         this.containerActions = builder.containerActions;
         this.itemActions = builder.itemActions;
         this.inventoryActions = builder.inventoryActions;
+        this.blockActions = builder.blockActions;
+        this.sessionActions = builder.sessionActions;
+        this.entityActions = builder.entityActions;
+        this.includeEntities = builder.includeEntities;
+        this.excludeEntities = builder.excludeEntities;
     }
 
     public static Builder builder() {
@@ -57,6 +75,10 @@ public final class LookupOptions {
 
     public Location getLocation() {
         return location;
+    }
+
+    public World getWorld() {
+        return world;
     }
 
     public int getLimitOffset() {
@@ -87,6 +109,14 @@ public final class LookupOptions {
         return excludeUsers;
     }
 
+    public List<String> getTextStartsWithAny() {
+        return textStartsWithAny;
+    }
+
+    public List<String> getTextStartsWithNone() {
+        return textStartsWithNone;
+    }
+
     public List<ContainerAction> getContainerActions() {
         return containerActions;
     }
@@ -99,20 +129,48 @@ public final class LookupOptions {
         return inventoryActions;
     }
 
+    public List<BlockAction> getBlockActions() {
+        return blockActions;
+    }
+
+    public List<SessionAction> getSessionActions() {
+        return sessionActions;
+    }
+
+    public List<EntityAction> getEntityActions() {
+        return entityActions;
+    }
+
+    public List<EntityType> getIncludeEntities() {
+        return includeEntities;
+    }
+
+    public List<EntityType> getExcludeEntities() {
+        return excludeEntities;
+    }
+
     public static final class Builder {
         private String user;
         private int time;
         private int radius = -1;
         private Location location;
+        private World world;
         private int limitOffset = -1;
         private int limitCount = -1;
         private List<Material> includeMaterials = List.of();
         private List<Material> excludeMaterials = List.of();
         private List<String> users = List.of();
         private List<String> excludeUsers = List.of();
+        private List<String> textStartsWithAny = List.of();
+        private List<String> textStartsWithNone = List.of();
         private List<ContainerAction> containerActions = List.of();
         private List<ItemAction> itemActions = List.of();
         private List<InventoryAction> inventoryActions = List.of();
+        private List<BlockAction> blockActions = List.of();
+        private List<SessionAction> sessionActions = List.of();
+        private List<EntityAction> entityActions = List.of();
+        private List<EntityType> includeEntities = List.of();
+        private List<EntityType> excludeEntities = List.of();
 
         private Builder() {
         }
@@ -129,13 +187,22 @@ public final class LookupOptions {
 
         public Builder location(Location location) {
             this.location = location;
+            this.world = null;
             this.radius = 0;
             return this;
         }
 
         public Builder radius(Location location, int radius) {
             this.location = location;
+            this.world = null;
             this.radius = radius;
+            return this;
+        }
+
+        public Builder world(World world) {
+            this.world = world;
+            this.location = null;
+            this.radius = -1;
             return this;
         }
 
@@ -165,6 +232,36 @@ public final class LookupOptions {
             return this;
         }
 
+        /**
+         * Includes chat, command and sign text matching any literal prefix.
+         * Empty means no inclusion restriction. Other lookup types ignore this option.
+         * @throws IllegalArgumentException if a prefix has fewer than three Unicode code points
+         */
+        public Builder textStartsWithAny(List<String> prefixes) {
+            this.textStartsWithAny = textPrefixes(prefixes);
+            return this;
+        }
+
+        /**
+         * Excludes chat, command and sign text matching any literal prefix.
+         * Exclusions take precedence over inclusions. A leading '-' is literal.
+         * @throws IllegalArgumentException if a prefix has fewer than three Unicode code points
+         */
+        public Builder textStartsWithNone(List<String> prefixes) {
+            this.textStartsWithNone = textPrefixes(prefixes);
+            return this;
+        }
+
+        private static List<String> textPrefixes(List<String> prefixes) {
+            List<String> copy = List.copyOf(prefixes);
+            for (String prefix : copy) {
+                if (prefix.codePointCount(0, prefix.length()) < 3) {
+                    throw new IllegalArgumentException("Text filter prefixes must contain at least three code points");
+                }
+            }
+            return copy;
+        }
+
         public Builder containerActions(List<ContainerAction> actions) {
             this.containerActions = List.copyOf(actions);
             return this;
@@ -177,6 +274,31 @@ public final class LookupOptions {
 
         public Builder inventoryActions(List<InventoryAction> actions) {
             this.inventoryActions = List.copyOf(actions);
+            return this;
+        }
+
+        public Builder blockActions(List<BlockAction> actions) {
+            this.blockActions = List.copyOf(actions);
+            return this;
+        }
+
+        public Builder sessionActions(List<SessionAction> actions) {
+            this.sessionActions = List.copyOf(actions);
+            return this;
+        }
+
+        public Builder entityActions(List<EntityAction> actions) {
+            this.entityActions = List.copyOf(actions);
+            return this;
+        }
+
+        public Builder includeEntities(List<EntityType> entities) {
+            this.includeEntities = List.copyOf(entities);
+            return this;
+        }
+
+        public Builder excludeEntities(List<EntityType> entities) {
+            this.excludeEntities = List.copyOf(entities);
             return this;
         }
 
