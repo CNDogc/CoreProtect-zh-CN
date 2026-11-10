@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -38,6 +39,19 @@ public class ConfigFile extends Config {
     private static final TreeMap<String, String> USER_VALUES = new TreeMap<>();
     private static final String DEFAULT_FILE_HEADER = "# CoreProtect Language File (en)";
     private final HashMap<String, String> lang;
+
+    /** i18n-zh: cached zh-CN template (jar resource), keyed by phrase name. */
+    private static Map<String, String> ZH_TEMPLATE = null;
+
+    /**
+     * i18n-zh: translations that changed between releases, as {@code PHRASE_NAME + "#" + oldText}.
+     * Only entries matching the value actually present in the file are rewritten.
+     */
+    private static final Map<String, String> LEGACY_TRANSLATIONS = new LinkedHashMap<>();
+    static {
+        LEGACY_TRANSLATIONS.put("HELP_PURGE_4#指定清除数据所属的世界。", "指定清除数据所属的世界或半径。");
+        LEGACY_TRANSLATIONS.put("HELP_PURGE_5#指定清除中要包含的方块。", "指定清除中要包含的方块或实体击杀。");
+    }
 
     public static void init(String fileName) throws IOException {
         for (Phrase phrase : Phrase.values()) {
@@ -164,6 +178,11 @@ public class ConfigFile extends Config {
             return;
         }
 
+        final boolean isLanguage = LANGUAGE.equals(file.getName()) && file.exists();
+        if (isLanguage) {
+            upgradeLanguageFile(file);
+        }
+
         final boolean writeHeader = !file.exists() || file.length() == 0;
         try (final FileOutputStream fout = new FileOutputStream(file, true)) {
             OutputStreamWriter out = new OutputStreamWriter(new BufferedOutputStream(fout), StandardCharsets.UTF_8);
@@ -174,12 +193,22 @@ public class ConfigFile extends Config {
 
             for (final Entry<String, String> entry : DEFAULT_VALUES.entrySet()) {
                 final String key = entry.getKey();
-                final String defaultValue = entry.getValue().replaceAll("\"", "\\\\\"");
 
                 final String configuredValue = this.lang.get(key);
                 if (configuredValue != null) {
                     continue;
                 }
+
+                String defaultValue = entry.getValue();
+                if (isLanguage) {
+                    // i18n-zh: a language file created by an older build gets new keys in Chinese,
+                    // not in the English defaults, so the admin never sees a half-translated UI.
+                    String translated = zhTemplate().get(key);
+                    if (translated != null) {
+                        defaultValue = translated;
+                    }
+                }
+                defaultValue = defaultValue.replaceAll("\"", "\\\\\"");
 
                 out.append(Config.LINE_SEPARATOR);
                 out.append(key);
@@ -189,6 +218,114 @@ public class ConfigFile extends Config {
 
             out.close();
         }
+    }
+
+    /**
+     * i18n-zh: updates the bundled zh-CN text of an existing language.yml in place.
+     *
+     * CoreProtect only seeds a language file when it does not exist yet; afterwards new keys are
+     * appended with the English defaults and edited phrases keep their old text. For the zh-CN
+     * branch that means an admin upgrading from an older build keeps seeing English until they
+     * delete the file. Two safe rewrites are applied here:
+     *
+     * 1. a value that still equals the English default was written by CoreProtect itself, so it is
+     *    replaced with the current Chinese text;
+     * 2. a value matching a known older translation is replaced with the current one.
+     *
+     * Anything else is treated as a deliberate edit by the admin and left untouched.
+     */
+    private void upgradeLanguageFile(final File file) throws IOException {
+        final Map<String, String> template = zhTemplate();
+        if (template.isEmpty()) {
+            return;
+        }
+
+        final List<String> lines = Files.readAllLines(file.toPath(), StandardCharsets.UTF_8);
+        final List<String> updated = upgradeLanguageLines(lines, template, DEFAULT_VALUES, LEGACY_TRANSLATIONS);
+        if (!updated.equals(lines)) {
+            Files.write(file.toPath(), updated, StandardCharsets.UTF_8);
+        }
+    }
+
+    public static List<String> upgradeLanguageLines(final List<String> lines, final Map<String, String> template, final Map<String, String> englishDefaults, final Map<String, String> legacy) {
+        final List<String> result = new ArrayList<>(lines);
+        boolean changed = false;
+
+        for (int i = 0; i < result.size(); i++) {
+            final String line = result.get(i);
+            final String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                continue;
+            }
+
+            final int split = trimmed.indexOf(':');
+            if (split <= 0) {
+                continue;
+            }
+
+            final String key = trimmed.substring(0, split).trim();
+            final String current = unquote(trimmed.substring(split + 1).trim());
+            final String target = template.get(key);
+            if (target == null) {
+                continue;
+            }
+
+            final String english = englishDefaults.get(key);
+            String replacement = null;
+            if (english != null && english.equals(current)) {
+                replacement = target;
+            }
+            else {
+                replacement = legacy.get(key + "#" + current);
+            }
+
+            if (replacement != null && !replacement.equals(current)) {
+                result.set(i, key + ": \"" + replacement.replace("\"", "\\\"") + "\"");
+                changed = true;
+            }
+        }
+
+        return changed ? result : lines;
+    }
+
+    private static String unquote(final String value) {
+        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+            return value.substring(1, value.length() - 1).replace("\\\"", "\"");
+        }
+        return value;
+    }
+
+    /** Bundled zh-CN template, keyed by phrase name. Loaded lazily from the jar. */
+    private static Map<String, String> zhTemplate() {
+        if (ZH_TEMPLATE != null) {
+            return ZH_TEMPLATE;
+        }
+
+        final Map<String, String> map = new LinkedHashMap<>();
+        try (InputStream in = ConfigFile.class.getResourceAsStream("/lang/language-zh.yml")) {
+            if (in != null) {
+                final BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+                    final int split = line.indexOf(':');
+                    if (split <= 0) {
+                        continue;
+                    }
+                    map.put(line.substring(0, split).trim(), unquote(line.substring(split + 1).trim()));
+                }
+                reader.close();
+            }
+        }
+        catch (Exception e) {
+            // fall back to English defaults when the template cannot be read
+        }
+
+        ZH_TEMPLATE = map;
+        return map;
     }
 
     public static void modifyLine(String fileName, String oldLine, String newLine) {
