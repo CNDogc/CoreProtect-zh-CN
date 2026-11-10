@@ -42,7 +42,6 @@ import net.coreprotect.model.lookup.LookupRollbackState;
 import net.coreprotect.model.rollback.SignRollbackChange;
 import net.coreprotect.utility.EntitySpawnTracking;
 import net.coreprotect.utility.EntityUtils;
-import net.coreprotect.utility.ErrorReporter;
 import net.coreprotect.utility.DatabaseUtils;
 import net.coreprotect.utility.MaterialUtils;
 import net.coreprotect.utility.WorldUtils;
@@ -101,11 +100,7 @@ public class LookupRaw extends Queue {
 
         boolean paused = false;
         try {
-            while (Consumer.isPaused && !Consumer.isPersistenceHalted()) {
-                Thread.sleep(1);
-            }
-            Consumer.isPaused = true;
-            paused = true;
+            paused = Consumer.claimLookupPause();
 
             Map<Integer, List<PageRow>> pageRows = new HashMap<>();
             long totalRows = Math.max(knownTotalRows, 0L);
@@ -154,12 +149,12 @@ public class LookupRaw extends Queue {
             return new RawLookupPage(totalRows, rows, nextCursor);
         }
         catch (Exception exception) {
-            ErrorReporter.report(exception);
+            Database.reportDatabaseFailure(exception);
             return new RawLookupPage(knownTotalRows > 0L ? knownTotalRows : 0L, Collections.emptyList(), null);
         }
         finally {
-            if (paused && !Consumer.isPersistenceHalted()) {
-                Consumer.isPaused = false;
+            if (paused) {
+                Consumer.releaseOperationPause();
             }
         }
     }
@@ -187,12 +182,8 @@ public class LookupRaw extends Queue {
         boolean paused = false;
         ResultSet results = null;
         try {
-            while (managePause && Consumer.isPaused && !Consumer.isPersistenceHalted()) {
-                Thread.sleep(1);
-            }
             if (managePause) {
-                Consumer.isPaused = true;
-                paused = true;
+                paused = Consumer.claimLookupPause();
             }
 
             if (ConfigHandler.databaseType.isClickHouse() && pageRows == null && limitOffset >= 0 && limitCount > 0) {
@@ -389,7 +380,7 @@ public class LookupRaw extends Queue {
             }
         }
         catch (Exception e) {
-            ErrorReporter.report(e);
+            Database.reportDatabaseFailure(e);
             return null;
         }
         finally {
@@ -398,11 +389,11 @@ public class LookupRaw extends Queue {
                     results.close();
                 }
                 catch (Exception e) {
-                    ErrorReporter.report(e);
+                    Database.reportDatabaseFailure(e);
                 }
             }
-            if (paused && !Consumer.isPersistenceHalted()) {
-                Consumer.isPaused = false;
+            if (paused) {
+                Consumer.releaseOperationPause();
             }
         }
         return list;
@@ -1287,7 +1278,7 @@ public class LookupRaw extends Queue {
             }
         }
         catch (Exception e) {
-            ErrorReporter.report(e);
+            Database.reportDatabaseFailure(e);
         }
 
         return results;
@@ -1573,11 +1564,12 @@ public class LookupRaw extends Queue {
         if (includePlaced && includeOther) {
             predicates.add("action=" + action);
         }
-        else if (includePlaced) {
-            predicates.add("(action=" + action + " AND type IN(" + placedEntityTypes + "))");
-        }
-        else if (includeOther) {
-            predicates.add("(action=" + action + " AND type NOT IN(" + placedEntityTypes + "))");
+        else if (includePlaced || includeOther) {
+            String negation = includePlaced ? "" : "NOT ";
+            String typePredicate = ConfigHandler.databaseType.isDuckDB()
+                    ? negation + "list_contains([" + placedEntityTypes + "],type)"
+                    : "type " + negation + "IN(" + placedEntityTypes + ")";
+            predicates.add("(action=" + action + " AND " + typePredicate + ")");
         }
     }
 
